@@ -44,12 +44,12 @@ cts_summary_norm$Length[cts_summary_norm$Geneid %in% exon_size_tmp$Geneid] <- ex
 RPM <- function(x) { ; return( x / (sum(x) / 1000000) ) ; }
 RPK <- function(x) { ; return( x / (cts_summary_norm$Length / 1000) ) ; } 
 TPM <- function(x) { ; return( x / (sum(x) / 1000000) ) ; }
-if (exists (args[7])) { # test if argument 7 has been provided
-  if (args[7] == "quantseq") { # normalize by RPM
+if (length(args) == 6) { # test if argument 6 has been provided
+  if (args[6] == "quantseq") { # normalize by RPM
     cts_summary_norm[,sample_columns] <- apply(X=cts_summary_norm[,sample_columns], MARGIN = 2, FUN = RPM) # normalizes all columns
     normalization <- "RPM"
   } else {
-    stop("7th argument should be 'quantseq' or left empty")
+    stop("6th argument should be 'quantseq' or left empty")
   }
 } else {
   cts_summary_norm[,sample_columns] <- apply(X=cts_summary_norm[,sample_columns], MARGIN = 2, FUN = RPK) # normalizes all columns by exon size

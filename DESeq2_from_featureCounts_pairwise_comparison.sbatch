@@ -5,7 +5,7 @@
 #SBATCH --mem-per-cpu=10G
 #SBATCH --time=0-00:10:00
 #SBATCH --output=logs/%A_%a_%x.out
-#SBATCH --error=logs/%A_%a_%x.err
+#SBATCH --error=logs/%A_%a_%x.out
 
 # $1 is the folder with the raw counts (and a counts_summary file)
 # $2 is the control condition prefix (eg Col0)
@@ -18,7 +18,7 @@
 # in the sample table, replicates must be indicated with R1, R2, R3...
 
 sample=(`tail -n+2 $3 | cut -d "," -f2 | sort | uniq | grep -wv "$2" | sed -n ${SLURM_ARRAY_TASK_ID}p`)
-echo -e "$(date) .. job ${SLURM_JOB_NAME} started on node $(/bin/hostname) with slurm ID: ${SLURM_JOB_ID} and array ${SLURM_ARRAY_TASK_ID}.\nfolder: ${1}\ncontrol: ${2}\nsample_table: ${3}\ntype: ${4}\nsample: ${sample}\n" 
+echo -e "$(date) .. job ${SLURM_JOB_NAME} started on node $(/bin/hostname) with slurm ID: ${SLURM_JOB_ID} and array ${SLURM_ARRAY_TASK_ID}.\nfolder: ${1}\ncontrol: ${2}\nsample_table: ${3}\ntype: ${4} ${5}\nsample: ${sample}\n" 
 
 ml build-env/f2020 r-bundle-bioconductor/3.9-foss-2019a-r-3.6.0
 

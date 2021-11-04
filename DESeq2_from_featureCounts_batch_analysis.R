@@ -12,6 +12,7 @@ args <- commandArgs(TRUE);
 # args <- c("/groups/berger/user/pierre.bourguet/genomics/RNAseq/ddm1_met1_suvh456_noWT_polyA_4-5w_leaves/", "Col0", "/groups/berger/user/pierre.bourguet/genomics/RNAseq/sample_tables/ddm1_met1_suvh456_withWT_polyA.samples", "single-strand", "sense")
 # args <- c("/groups/berger/user/pierre.bourguet/genomics/RNAseq/w1_h1_suvh4_cmt2_nrpd2a/", "WT_Col", "/groups/berger/user/pierre.bourguet/genomics/RNAseq/sample_tables/w1_suvh4_nrpd2a.tab", "single-strand", "sense")
 # args <- c("/groups/berger/user/pierre.bourguet/genomics/RNAseq/pol2a_12_polyA_13d_seedlings/", "L5", "/groups/berger/user/pierre.bourguet/genomics/RNAseq/sample_tables/pol2a_12_polyA_13d_seedlings.samples", "single-strand", "sense")
+# args <- c("/groups/berger/user/pierre.bourguet/genomics/RNAseq/2020_Rougee_ddm1_clf/", "Col", "/groups/berger/user/pierre.bourguet/genomics/RNAseq/sample_tables/2020_Rougee_ddm1_clf.samples", "single-strand", "sense", "quantseq")
 
 # metadata <- subset(read.delim("/groups/berger/user/pierre.bourguet/genomics/Araport11/Araport11_GFF3_PCG_TE_TEG.SAF", head=T, sep="\t", quote="", comment.char=""),  subset = !Chr %in% c("chrC", "chrM"))  # not using this so far
 TEGs <- subset(read.delim("/groups/berger/user/pierre.bourguet/genomics/Araport11/Araport11_GFF3_PCG_TE_TEG.SAF", head=T, sep="\t", quote="", comment.char=""), Type=="transposable_element_gene")
@@ -47,12 +48,12 @@ cts_summary_norm$Length[cts_summary_norm$Geneid %in% exon_size_tmp$Geneid] <- ex
 RPM <- function(x) { ; return( x / (sum(x) / 1000000) ) ; }
 RPK <- function(x) { ; return( x / (cts_summary_norm$Length / 1000) ) ; } 
 TPM <- function(x) { ; return( x / (sum(x) / 1000000) ) ; }
-if (exists (args[7])) { # test if argument 7 has been provided
-  if (args[7] == "quantseq") { # normalize by RPM
+if (length(args) == 6) { # test if argument 6 has been provided
+  if (args[6] == "quantseq") { # normalize by RPM
     cts_summary_norm[,sample_columns] <- apply(X=cts_summary_norm[,sample_columns], MARGIN = 2, FUN = RPM) # normalizes all columns
     normalization <- "RPM"
   } else {
-    stop("7th argument should be 'quantseq' or left empty")
+    stop("6th argument should be 'quantseq' or left empty")
   }
 } else {
   cts_summary_norm[,sample_columns] <- apply(X=cts_summary_norm[,sample_columns], MARGIN = 2, FUN = RPK) # normalizes all columns by exon size
@@ -162,6 +163,7 @@ DEG_write <- function(x, y) {
 }
 mapply(FUN = DEG_write, x=DEGs, y=names(DEGs))
 write.table(x=t(as.data.frame(lapply(DEGs, FUN=length))), file=paste0(dirname, "DEGs_batch.tsv"), quote = F, sep="\t", row.names=T, col.names=F)
-write.table(x=cts_summary_norm_mean, file=paste0(args[1], "TPM", strand, ".tsv"), quote = F, sep="\t", row.names=F, col.names=T)
+# write file with TPM / RPM values for all samples, averaged over replicates
+write.table(x=cts_summary_norm_mean, file=paste0(args[1], normalization, strand, ".tsv"), quote = F, sep="\t", row.names=F, col.names=T)
 
 unlink("Rplots.pdf") # delete that plot that is always created for some reason
