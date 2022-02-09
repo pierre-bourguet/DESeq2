@@ -17,6 +17,7 @@
 
 # in the sample table, replicates must be indicated with R1, R2, R3...
 
+inputdir=${1%/}/ # this is to deal with cases where user did not include a slash at the end of the 1st argument
 sample=(`tail -n+2 $3 | cut -d "," -f2 | sort | uniq | grep -wv "$2" | sed -n ${SLURM_ARRAY_TASK_ID}p`)
 echo -e "$(date) .. job ${SLURM_JOB_NAME} started on node $(/bin/hostname) with slurm ID: ${SLURM_JOB_ID} and array ${SLURM_ARRAY_TASK_ID}.\nfolder: ${1}\ncontrol: ${2}\nsample_table: ${3}\ntype: ${4} ${5}\nsample: ${sample}\n" 
 
@@ -24,14 +25,14 @@ ml build-env/f2020 r-bundle-bioconductor/3.9-foss-2019a-r-3.6.0
 
 if [[ "${SLURM_ARRAY_TASK_ID}" -eq 1 ]]; then
     echo -e "\ndoing batch analysis... \n"
-    Rscript DESeq2_from_featureCounts_batch_analysis.R $1 $2 $3 $4 sense $5 &
-    Rscript DESeq2_from_featureCounts_batch_analysis.R $1 $2 $3 $4 antisense $5
+    Rscript DESeq2_from_featureCounts_batch_analysis.R $inputdir $2 $3 $4 sense $5 &
+    Rscript DESeq2_from_featureCounts_batch_analysis.R $inputdir $2 $3 $4 antisense $5
     wait
 fi
 
 echo -e "\ndoing pairwise comparison... \n"
 
-Rscript /groups/berger/user/pierre.bourguet/genomics/scripts/DESeq2/DESeq2_from_featureCounts_pairwise_comparison.R $1 $2 $sample $3 $4 $5
+Rscript /groups/berger/user/pierre.bourguet/genomics/scripts/DESeq2/DESeq2_from_featureCounts_pairwise_comparison.R $inputdir $2 $sample $3 $4 $5
 
 echo -e "\nplotting 100kb windows... \n"
 module reset
