@@ -1,2 +1,6 @@
 *.err
 w_s456_samples.sh
+backup/
+logs/
+intersect_DEG
+lncRNAs
