@@ -1,6 +1,4 @@
-*.err
-w_s456_samples.sh
-backup/
 logs/
-intersect_DEG
-lncRNAs
+*.err
+# compiled/installed R library (apeglm + deps) -- reproducible via install_apeglm.R, not source
+Rlib/
