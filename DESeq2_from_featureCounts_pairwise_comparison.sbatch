@@ -3,7 +3,7 @@
 #SBATCH --ntasks=2
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=10G
-#SBATCH --time=0-02:00:00
+#SBATCH --time=0-01:30:00
 #SBATCH --output=logs/%A_%a_%x.out
 #SBATCH --error=logs/%A_%a_%x.out
 
@@ -26,7 +26,7 @@ ml build-env/f2020 r-bundle-bioconductor/3.9-foss-2019a-r-3.6.0
 if [[ "${SLURM_ARRAY_TASK_ID}" -eq 1 ]]; then
     echo -e "\ndoing batch analysis... \n"
     Rscript DESeq2_from_featureCounts_batch_analysis.R $inputdir $2 $3 $4 sense $5 &
-    #Rscript DESeq2_from_featureCounts_batch_analysis.R $inputdir $2 $3 $4 antisense $5
+    Rscript DESeq2_from_featureCounts_batch_analysis.R $inputdir $2 $3 $4 antisense $5
     wait
 fi
 

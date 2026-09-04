@@ -96,9 +96,20 @@ DESeq2_function <- function(x) { # x should be cts_summary.tsv file (summary of 
   # differential analysis
   dds <- DESeq(dds)
   res <- results(dds, contrast=c("condition",args[3],args[2]))
-  return(res)
+  return(list(dds=dds, res=res))
 }
-res <- DESeq2_function(cts_summary)
+res_list <- DESeq2_function(cts_summary)
+dds <- res_list$dds
+res <- res_list$res
+
+# shrink log2FC estimates (apeglm) and export the whole matrix (all genes, not just DEGs)
+suppressPackageStartupMessages(library("apeglm"))
+export_shrunken_lfc <- function(dds, treatment, reference, out_file) {
+  coef_name <- resultsNames(dds)[grepl("^condition_", resultsNames(dds))] # single condition coefficient (2-level factor, releveled to reference)
+  res_shrunk <- lfcShrink(dds, coef=coef_name, type="apeglm")
+  df <- data.frame(Geneid=row.names(res_shrunk), as.data.frame(res_shrunk), check.names=FALSE)
+  write.table(df, file=out_file, quote=F, sep="\t", row.names=F, col.names=T)
+}
 
 # DEGs ####
 upTEGs <- res[row.names(res) %in% TEGs$GeneId & res$log2FoldChange >=1 & !is.na(res$padj) & res$padj < 0.05,]
@@ -123,6 +134,9 @@ TPM_to_df <- function(df, sample_nb, norm_df=cts_summary_norm) {
   return(df[,c(8:13,7,14,1:6,15:(14+sample_nb))])
 }
 DEGs <- lapply(DEGs, FUN=TPM_to_df, sample_nb=length(samples$condition))
+
+# export shrunken log2FC estimates for all genes (sense)
+export_shrunken_lfc(dds, treatment=args[3], reference=args[2], out_file=paste0(args[3], "_vs_", args[2], "_shrunken_log2FC_all_genes.tsv"))
 
 # create DEG directory
 dirname <- paste("DEGs_", args[3], "_vs_", args[2], "/", sep="")
@@ -153,7 +167,9 @@ cts_summary_AS <- read.delim("counts_AS_summary.tsv", header=T, sep='\t', quote=
 row.names(cts_summary_AS) <- cts_summary_AS$Geneid
 cts_summary_AS <- cts_summary_AS[!(substr(cts_summary_AS$Chr,4,4) == "C" | substr(cts_summary_AS$Chr,4,4) == "M"),] # removing chloroplastic and mitochondrial genes, consistent with the sense counts
 stopifnot("sense and antisense count files must have identical column layouts" = identical(names(cts_summary), names(cts_summary_AS))) # subsample_columns / sample_columns indices are reused for the AS table
-res_AS <- DESeq2_function(cts_summary_AS)
+res_AS_list <- DESeq2_function(cts_summary_AS)
+dds_AS <- res_AS_list$dds
+res_AS <- res_AS_list$res
 
 # TPM / RPM normalization of the antisense counts (mirrors the sense normalization above)
 cts_summary_AS_norm <- cts_summary_AS
@@ -189,6 +205,9 @@ DEGs_AS <- list(upTEGs_AS, upTEs_AS, upPCGs_AS, downTEGs_AS, downTEs_AS, downPCG
 names(DEGs_AS) <- c("upTEGs_AS", "upTEs_AS", "upPCGs_AS", "downTEGs_AS", "downTEs_AS", "downPCGs_AS")
 DEGs_AS_mean <- lapply(DEGs_AS, FUN=mean_TPM_to_df, sample_nb=length(unique(sort(samples$condition))), norm_df=cts_summary_AS_norm_mean) # must be computed BEFORE DEGs_AS is overwritten by TPM_to_df (row.names merge would break otherwise)
 DEGs_AS <- lapply(DEGs_AS, FUN=TPM_to_df, sample_nb=length(samples$condition), norm_df=cts_summary_AS_norm)
+
+# export shrunken log2FC estimates for all genes (antisense)
+export_shrunken_lfc(dds_AS, treatment=args[3], reference=args[2], out_file=paste0(args[3], "_vs_", args[2], "_AS_shrunken_log2FC_all_genes.tsv"))
 # plot heatmaps (using antisense-normalized values)
 mapply(FUN = DEG_heatmap, x=DEGs_AS, y=paste0(names(DEGs_AS), "_mean"), MoreArgs = list(z=cts_summary_AS_norm_mean[,which(names(cts_summary_AS_norm_mean) %in% samples$condition)]) )
 mapply(FUN = DEG_heatmap, x=DEGs_AS, y=names(DEGs_AS), MoreArgs = list(z=cts_summary_AS_norm[,sample_columns]) )
