@@ -265,6 +265,12 @@ for (i in seq_along(combined_conditions)) {
   df_shrunk <- data.frame(Geneid=row.names(res_shrunk), as.data.frame(res_shrunk), check.names=FALSE)
   write.table(df_shrunk, file=paste0(dirname_pair, combined, "_vs_", single, "_shrunken_log2FC_all_genes.tsv"), quote=F, sep="\t", row.names=F, col.names=T)
 
+  # un-shrunken (raw results()) log2FC estimates for all genes -- same shape as the shrunken
+  # export above, but from `res` (the value DEG calling itself uses) rather than `res_shrunk`.
+  # Mirrors DESeq2_pipeline.R's per-comparison shrunken/un-shrunken pairing.
+  df_raw <- data.frame(Geneid=row.names(res), as.data.frame(res), check.names=FALSE)
+  write.table(df_raw, file=paste0(dirname_pair, combined, "_vs_", single, "_unshrunken_log2FC_all_genes.tsv"), quote=F, sep="\t", row.names=F, col.names=T)
+
   invisible(mapply(FUN = DEG_heatmap_df, x=DEGs_mean, y=paste0(combined, "_vs_", single, "_", names(DEGs), "_mean"), MoreArgs = list(z=cts_summary_norm_mean[,which(names(cts_summary_norm_mean) %in% samples$condition)], dirname=dirname_pair) ))
   invisible(mapply(FUN = DEG_heatmap_df, x=DEGs,      y=paste0(combined, "_vs_", single, "_", names(DEGs)),        MoreArgs = list(z=cts_summary_norm[,sample_columns], dirname=dirname_pair) ))
 
