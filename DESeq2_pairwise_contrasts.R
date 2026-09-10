@@ -128,6 +128,14 @@ samples <- read.delim(sample_table_path, header=T, sep=',', quote="", dec=".", c
 samples <- samples[order(samples[,1], samples[,2]),] # reorder samples by alphabetical names
 sample_columns <- which(names(cts_summary) %in% paste(samples$condition, samples$sample, sep="_")) # columns holding sample counts
 
+# Drop any genotype/replicate column present in counts_summary.tsv but not listed in the sample
+# table (e.g. when input_dir is shared with a larger dataset and this run's sample table is a
+# genuine subset of its genotypes) -- annotate_df()/average_replicates() below assume columns 1:8
+# are metadata and 9:ncol are exactly this run's samples; leaving extra columns in would leak raw,
+# unnormalized counts for the dropped genotypes into the exported tables instead of being excluded.
+cts_summary <- cts_summary[, c(1:8, sample_columns)]
+sample_columns <- 9:ncol(cts_summary)
+
 missing_conditions <- setdiff(c(combined_conditions, single_conditions), unique(samples$condition))
 if (length(missing_conditions) > 0) {
   stop("condition(s) not found in the sample table: ", paste(missing_conditions, collapse=", "))
