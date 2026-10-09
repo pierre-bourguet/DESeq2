@@ -39,6 +39,16 @@
 # "_AS" for antisense), so a sense run and an antisense run never collide,
 # and re-running either one simply overwrites its own outputs.
 #
+# Antisense run: its size factors are estimated on the antisense counts
+# alone, and so measure antisense composition, not library depth. In the
+# h2a.w polyA dataset they mostly track strand leakage (a per-library
+# fraction of the sense reads); without leakage (quant-seq) they remove real
+# genome-wide antisense changes. Antisense log2FC and DEG counts carry these
+# offsets; sense results are not affected. Antisense BH is done on its own,
+# which is correct. Benchmark of the alternatives (shared/tools/
+# deseq2_antisense_benchmark/): projects/2020_h2aw_suvh456/04_results/
+# genomics/postprocessing/rnaseq/antisense_deseq2_benchmark/RESULTS.md
+#
 # The fitted Master dds object is saved as dds[_AS].rds at the root of the
 # output directory (readRDS() it back to build custom contrasts without
 # refitting).
