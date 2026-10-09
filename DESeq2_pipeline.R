@@ -39,15 +39,12 @@
 # "_AS" for antisense), so a sense run and an antisense run never collide,
 # and re-running either one simply overwrites its own outputs.
 #
-# Antisense run: its size factors are estimated on the antisense counts
-# alone, and so measure antisense composition, not library depth. In the
-# h2a.w polyA dataset they mostly track strand leakage (a per-library
-# fraction of the sense reads); without leakage (quant-seq) they remove real
-# genome-wide antisense changes. Antisense log2FC and DEG counts carry these
-# offsets; sense results are not affected. Antisense BH is done on its own,
-# which is correct. Benchmark of the alternatives (shared/tools/
-# deseq2_antisense_benchmark/): projects/2020_h2aw_suvh456/04_results/
-# genomics/postprocessing/rnaseq/antisense_deseq2_benchmark/RESULTS.md
+# Antisense run: needs the sense run's dds.rds in the output directory (run
+# sense first). Raw antisense counts, own dispersion trend and BH, size
+# factors of the sense fit; antisense DEG calls are kept only if they pass the
+# leakage and opposite-strand partner rules of antisense_calls.R (this
+# folder). Writes antisense_leakage.tsv (leak rate per library) and adds the
+# two values the rules use to the all-genes tables of each comparison.
 #
 # The fitted Master dds object is saved as dds[_AS].rds at the root of the
 # output directory (readRDS() it back to build custom contrasts without
@@ -83,6 +80,8 @@ suppressPackageStartupMessages(library(RColorBrewer))
 suppressPackageStartupMessages(library(pheatmap))
 suppressPackageStartupMessages(library(apeglm))
 suppressPackageStartupMessages(library(circlize)) # for colorRamp2, used by col_log2FC below
+file_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)[1]
+source(file.path(dirname(normalizePath(sub("^--file=", "", file_arg))), "antisense_calls.R"))
 
 # ---- User-customizable thresholds (used everywhere DEGs are filtered) ----
 lfc_threshold  <- 1     # |log2FoldChange| cutoff (on the un-shrunken results() estimate, as in the old scripts)
@@ -112,9 +111,10 @@ dir.create(output_dir, recursive=TRUE, showWarnings=FALSE)
 # ============================================================================
 # Annotation import (Araport11 SAF: PCGs, TEs, TEGs)
 # ============================================================================
-TEGs <- subset(read.delim("/groups/berger/user/pierre.bourguet/genomics/Araport11/Araport11_GFF3_PCG_TE_TEG.SAF", head=T, sep="\t", quote="", comment.char="", check.names=FALSE), Type=="transposable_element_gene")
-TEs  <- subset(read.delim("/groups/berger/user/pierre.bourguet/genomics/Araport11/Araport11_GFF3_PCG_TE_TEG.SAF", head=T, sep="\t", quote="", comment.char="", check.names=FALSE), Type=="transposable_element")
-PCGs <- subset(read.delim("/groups/berger/user/pierre.bourguet/genomics/Araport11/Araport11_GFF3_PCG_TE_TEG.SAF", head=T, sep="\t", quote="", comment.char="", check.names=FALSE), Type=="gene")
+SAF  <- read.delim("/groups/berger/user/pierre.bourguet/genomics/Araport11/Araport11_GFF3_PCG_TE_TEG.SAF", head=T, sep="\t", quote="", comment.char="", check.names=FALSE)
+TEGs <- subset(SAF, Type=="transposable_element_gene")
+TEs  <- subset(SAF, Type=="transposable_element")
+PCGs <- subset(SAF, Type=="gene")
 
 # ============================================================================
 # Import counts, apply sense/antisense selection (args[5])
@@ -236,7 +236,41 @@ mcols(dds) <- DataFrame(mcols(dds))
 keep <- rowSums(counts(dds)) >= 10 # pre-filtering low-count features
 dds <- dds[keep,]
 dds$condition <- relevel(dds$condition, ref = args[2]) # setting the reference/WT condition
+if (strand == "_AS") { # antisense: size factors of the sense fit
+  if (!file.exists("dds.rds")) stop("antisense run needs the sense fit (dds.rds) in ", output_dir, ": run the sense strand first")
+  dds_sense <- readRDS("dds.rds")
+  sizeFactors(dds) <- sizeFactors(dds_sense)[colnames(dds)]
+}
 dds <- DESeq(dds) # single dispersion estimation across the whole experiment
+
+if (strand == "_AS") {
+  # strand leakage per library, from the raw counts before the pre-filter
+  S_tab <- read.delim(paste0(input_dir, "counts_summary.tsv"), header=T, sep='\t', quote="", dec=".", comment.char="", check.names=FALSE)
+  S_raw <- as.matrix(ceiling(S_tab[, colnames(cts)])) ; row.names(S_raw) <- S_tab$Geneid
+  A_raw <- as.matrix(cts)
+  leak <- leak_rates(S_raw, A_raw, sizeFactors(dds), PCGs$GeneId)
+  write.table(data.frame(sample=colnames(dds), condition=dds$condition, size_factor=sizeFactors(dds), leak_rate=leak[colnames(dds)]),
+              file="antisense_leakage.tsv", quote=F, sep="\t", row.names=F, col.names=T)
+  # features of either fit overlapping on opposite strands
+  ann <- SAF[SAF$GeneId %in% union(row.names(dds), row.names(dds_sense)), ]
+  strand_pairs <- opposite_strand_pairs(data.frame(id=ann$GeneId, chr=ann$Chr, start=ann$Start, end=ann$End, strand=ann$Strand))
+}
+
+# DEG calls of one comparison; antisense calls also need to pass the rules of antisense_calls.R (`kept`)
+is_call <- function(res, ann, direction, kept=rep(TRUE, nrow(res))) {
+  lfc_ok <- if (direction == "up") res$log2FoldChange >= lfc_threshold else res$log2FoldChange <= -lfc_threshold
+  row.names(res) %in% ann$GeneId & lfc_ok & !is.na(res$padj) & res$padj < padj_threshold & kept
+}
+# values of the antisense rules for one comparison (cond vs ref)
+antisense_rule_values <- function(res, cond, ref) {
+  res_sense <- results(dds_sense, contrast=c("condition", cond, ref))
+  sense_up   <- row.names(res_sense)[is_call(res_sense, SAF, "up")]
+  sense_down <- row.names(res_sense)[is_call(res_sense, SAF, "down")]
+  ids <- row.names(res)
+  data.frame(antisense_over_leakage = antisense_over_leakage(S_raw, A_raw, sizeFactors(dds), leak, ids, res$log2FoldChange,
+                                                             colnames(dds)[dds$condition == cond], colnames(dds)[dds$condition == ref]),
+             opposite_strand_sense_DEG = opposite_strand_sense_calls(ids, res$log2FoldChange, strand_pairs, sense_up, sense_down))
+}
 
 # save the fitted Master dds object itself (readRDS() it back later for custom
 # contrasts -- e.g. dds <- readRDS("dds.rds") -- without re-running DESeq())
@@ -346,6 +380,7 @@ DEG_heatmap_df <- function(x, y, z, dirname) {
 # combined cross-mutant DEG summary further below (legacy "batch" feature).
 # ============================================================================
 all_res <- list()
+all_kept <- list() # per comparison, TRUE for features whose calls are kept (all sense features; antisense features passing the rules)
 all_shrunk <- list() # shrunken-log2FC results per condition, reused below for the combined all-comparisons table and the DEGs_batch log2FC heatmap
 
 # manifest of DEGs_<condition>_vs_<ref> folders produced by THIS run, consumed
@@ -360,6 +395,13 @@ for (cond in conditions) {
 
   res <- results(dds, contrast=c("condition", cond, args[2]))
   all_res[[cond]] <- res
+  if (strand == "_AS") {
+    rule_values <- antisense_rule_values(res, cond, args[2])
+    kept <- antisense_call_kept(rule_values$antisense_over_leakage, rule_values$opposite_strand_sense_DEG)
+  } else {
+    kept <- rep(TRUE, nrow(res))
+  }
+  all_kept[[cond]] <- kept
 
   # shrink log2FC estimates (type="apeglm") for the whole gene set (not just DEGs). 
   coef_name <- resultsNames(dds)[startsWith(resultsNames(dds), paste0("condition_", cond, "_vs_"))]
@@ -367,12 +409,12 @@ for (cond in conditions) {
   all_shrunk[[cond]] <- res_shrunk
 
   # DEGs, using the customizable thresholds defined at the top of the script
-  upTEGs   <- res[row.names(res) %in% TEGs$GeneId & res$log2FoldChange >= lfc_threshold  & !is.na(res$padj) & res$padj < padj_threshold,]
-  upTEs    <- res[row.names(res) %in% TEs$GeneId  & res$log2FoldChange >= lfc_threshold  & !is.na(res$padj) & res$padj < padj_threshold,]
-  upPCGs   <- res[row.names(res) %in% PCGs$GeneId & res$log2FoldChange >= lfc_threshold  & !is.na(res$padj) & res$padj < padj_threshold,]
-  downTEGs <- res[row.names(res) %in% TEGs$GeneId & res$log2FoldChange <= -lfc_threshold & !is.na(res$padj) & res$padj < padj_threshold,]
-  downTEs  <- res[row.names(res) %in% TEs$GeneId  & res$log2FoldChange <= -lfc_threshold & !is.na(res$padj) & res$padj < padj_threshold,]
-  downPCGs <- res[row.names(res) %in% PCGs$GeneId & res$log2FoldChange <= -lfc_threshold & !is.na(res$padj) & res$padj < padj_threshold,]
+  upTEGs   <- res[is_call(res, TEGs, "up", kept),]
+  upTEs    <- res[is_call(res, TEs,  "up", kept),]
+  upPCGs   <- res[is_call(res, PCGs, "up", kept),]
+  downTEGs <- res[is_call(res, TEGs, "down", kept),]
+  downTEs  <- res[is_call(res, TEs,  "down", kept),]
+  downPCGs <- res[is_call(res, PCGs, "down", kept),]
   DEGs <- list(upTEGs=upTEGs, upTEs=upTEs, upPCGs=upPCGs, downTEGs=downTEGs, downTEs=downTEs, downPCGs=downPCGs)
 
   # attach TPM/RPM columns (mean-of-replicates version, and per-sample version)
@@ -385,6 +427,7 @@ for (cond in conditions) {
 
   # export shrunken log2FC estimates for all genes
   df_shrunk <- data.frame(Geneid=row.names(res_shrunk), as.data.frame(res_shrunk), check.names=FALSE)
+  if (strand == "_AS") df_shrunk <- cbind(df_shrunk, rule_values)
   write.table(df_shrunk, file=paste0(dirname_pair, cond, "_vs_", args[2], "_shrunken_log2FC_all_genes.tsv"), quote=F, sep="\t", row.names=F, col.names=T)
 
   # heatmaps
@@ -430,19 +473,16 @@ write.table(x=log2FC_raw_df, file=paste0("unshrunken_log2FC_all_comparisons", st
 # across ALL mutant conditions, reusing the `all_res` list computed above
 # (no re-fitting / re-testing -- same Master model, just re-summarized).
 # ============================================================================
-up <- function(x, ann) {
-  row.names(x[row.names(x) %in% ann$GeneId & x$log2FoldChange >= lfc_threshold & !is.na(x$padj) & x$padj < padj_threshold,])
-}
-down <- function(x, ann) {
-  row.names(x[row.names(x) %in% ann$GeneId & x$log2FoldChange <= -lfc_threshold & !is.na(x$padj) & x$padj < padj_threshold,])
+union_calls <- function(ann, direction) {
+  unique(unlist(lapply(names(all_res), function(cond) row.names(all_res[[cond]])[is_call(all_res[[cond]], ann, direction, all_kept[[cond]])])))
 }
 DEGs_batch <- list(
-  upTEGs   = unique(unlist(lapply(all_res, up,   ann=TEGs))),
-  upTEs    = unique(unlist(lapply(all_res, up,   ann=TEs))),
-  upPCGs   = unique(unlist(lapply(all_res, up,   ann=PCGs))),
-  downTEGs = unique(unlist(lapply(all_res, down, ann=TEGs))),
-  downTEs  = unique(unlist(lapply(all_res, down, ann=TEs))),
-  downPCGs = unique(unlist(lapply(all_res, down, ann=PCGs)))
+  upTEGs   = union_calls(TEGs, "up"),
+  upTEs    = union_calls(TEs,  "up"),
+  upPCGs   = union_calls(PCGs, "up"),
+  downTEGs = union_calls(TEGs, "down"),
+  downTEs  = union_calls(TEs,  "down"),
+  downPCGs = union_calls(PCGs, "down")
 )
 
 # heatmaps (mean-of-replicates and per-sample, for each of TPM/RPM, MoR and rlog/vst normalizations)

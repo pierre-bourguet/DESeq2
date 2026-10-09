@@ -21,7 +21,8 @@
 # This is no longer a --array job: DESeq2_pipeline.R fits ONE Master model
 # per strand and internally loops over every non-reference condition to
 # extract all pairwise comparisons, so a single sense run + a single
-# antisense run cover the whole experiment. Post-processing (DEG summary +
+# antisense run cover the whole experiment (antisense after sense, see the
+# header of DESeq2_pipeline.R). Post-processing (DEG summary +
 # cross-condition intersects) now runs automatically at the end, reading the
 # manifest files DESeq2_pipeline.R writes -- no separate manual step needed.
 #
@@ -50,10 +51,10 @@ export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OMP_THREAD_LIMIT=1
 
-echo -e "\nrunning DESeq2 Master model + pairwise extraction (sense & antisense in parallel)...\n"
-Rscript "${pipeline_dir}/DESeq2_pipeline.R" "$inputdir" "$2" "$3" "$4" sense "$5" "$6" &
+# antisense after sense: the antisense fit uses the sense size factors and sense calls (dds.rds)
+echo -e "\nrunning DESeq2 Master model + pairwise extraction (sense, then antisense)...\n"
+Rscript "${pipeline_dir}/DESeq2_pipeline.R" "$inputdir" "$2" "$3" "$4" sense "$5" "$6" || exit 1
 Rscript "${pipeline_dir}/DESeq2_pipeline.R" "$inputdir" "$2" "$3" "$4" antisense "$5" "$6"
-wait
 
 echo -e "\nrunning post-processing (DEGs_summary + cross-condition intersects, sense & antisense)...\n"
 module reset

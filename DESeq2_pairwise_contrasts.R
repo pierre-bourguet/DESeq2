@@ -33,7 +33,9 @@
 # args[2] = path to the sample table used for the ORIGINAL master run (same
 #           file, comma-separated, columns 2 & 3 "condition"/"sample").
 # args[3] = "sense" or "antisense" -- must match the strand of the dds[_AS].rds
-#           being loaded.
+#           being loaded. Antisense also reads dds.rds and antisense_leakage.tsv
+#           from dds_dir: its calls pass the rules of antisense_calls.R, as in
+#           DESeq2_pipeline.R.
 # args[4] = "quantseq" (RPM) or "" (TPM) -- must match the normalization used
 #           in the original run (so the TPM/RPM columns attached to DEG tables
 #           here are computed the same way).
@@ -74,6 +76,8 @@ suppressPackageStartupMessages(library(DESeq2))
 suppressPackageStartupMessages(library(RColorBrewer))
 suppressPackageStartupMessages(library(pheatmap))
 suppressPackageStartupMessages(library(apeglm))
+file_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)[1]
+source(file.path(dirname(normalizePath(sub("^--file=", "", file_arg))), "antisense_calls.R"))
 
 # ---- User-customizable thresholds (kept in sync BY HAND with DESeq2_pipeline.R) ----
 lfc_threshold  <- 1     # |log2FoldChange| cutoff (on the un-shrunken results() estimate)
@@ -103,9 +107,10 @@ if (length(combined_conditions) == 0) {
 # ============================================================================
 # Annotation import (Araport11 SAF: PCGs, TEs, TEGs) -- identical to DESeq2_pipeline.R
 # ============================================================================
-TEGs <- subset(read.delim("/groups/berger/user/pierre.bourguet/genomics/Araport11/Araport11_GFF3_PCG_TE_TEG.SAF", head=T, sep="\t", quote="", comment.char="", check.names=FALSE), Type=="transposable_element_gene")
-TEs  <- subset(read.delim("/groups/berger/user/pierre.bourguet/genomics/Araport11/Araport11_GFF3_PCG_TE_TEG.SAF", head=T, sep="\t", quote="", comment.char="", check.names=FALSE), Type=="transposable_element")
-PCGs <- subset(read.delim("/groups/berger/user/pierre.bourguet/genomics/Araport11/Araport11_GFF3_PCG_TE_TEG.SAF", head=T, sep="\t", quote="", comment.char="", check.names=FALSE), Type=="gene")
+SAF  <- read.delim("/groups/berger/user/pierre.bourguet/genomics/Araport11/Araport11_GFF3_PCG_TE_TEG.SAF", head=T, sep="\t", quote="", comment.char="", check.names=FALSE)
+TEGs <- subset(SAF, Type=="transposable_element_gene")
+TEs  <- subset(SAF, Type=="transposable_element")
+PCGs <- subset(SAF, Type=="gene")
 
 # ============================================================================
 # Import counts, apply sense/antisense selection (args[3]) -- identical logic
@@ -217,6 +222,31 @@ if (length(missing_levels) > 0) {
   stop("condition(s) not found among dds$condition levels (check spelling/strand): ", paste(missing_levels, collapse=", "))
 }
 
+# DEG calls of one comparison; antisense calls also need to pass the rules of antisense_calls.R (`kept`), as in DESeq2_pipeline.R
+is_call <- function(res, ann, direction, kept=rep(TRUE, nrow(res))) {
+  lfc_ok <- if (direction == "up") res$log2FoldChange >= lfc_threshold else res$log2FoldChange <= -lfc_threshold
+  row.names(res) %in% ann$GeneId & lfc_ok & !is.na(res$padj) & res$padj < padj_threshold & kept
+}
+if (strand == "_AS") {
+  dds_sense <- readRDS(paste0(dds_dir, "dds.rds"))
+  leak_tab <- read.delim(paste0(dds_dir, "antisense_leakage.tsv"))
+  leak <- setNames(leak_tab$leak_rate, leak_tab$sample)
+  S_tab <- read.delim(paste0(input_dir, "counts_summary.tsv"), header=T, sep='\t', quote="", dec=".", comment.char="", check.names=FALSE)
+  S_raw <- as.matrix(ceiling(S_tab[, colnames(dds)])) ; row.names(S_raw) <- S_tab$Geneid
+  A_raw <- as.matrix(ceiling(cts_summary[, colnames(dds)]))
+  ann <- SAF[SAF$GeneId %in% union(row.names(dds), row.names(dds_sense)), ]
+  strand_pairs <- opposite_strand_pairs(data.frame(id=ann$GeneId, chr=ann$Chr, start=ann$Start, end=ann$End, strand=ann$Strand))
+  antisense_rule_values <- function(res, cond, ref) {
+    res_sense <- results(dds_sense, contrast=c("condition", cond, ref))
+    sense_up   <- row.names(res_sense)[is_call(res_sense, SAF, "up")]
+    sense_down <- row.names(res_sense)[is_call(res_sense, SAF, "down")]
+    ids <- row.names(res)
+    data.frame(antisense_over_leakage = antisense_over_leakage(S_raw, A_raw, sizeFactors(dds), leak, ids, res$log2FoldChange,
+                                                               colnames(dds)[dds$condition == cond], colnames(dds)[dds$condition == ref]),
+               opposite_strand_sense_DEG = opposite_strand_sense_calls(ids, res$log2FoldChange, strand_pairs, sense_up, sense_down))
+  }
+}
+
 # ============================================================================
 # Heatmap helper -- identical to DEG_heatmap_df in DESeq2_pipeline.R
 # ============================================================================
@@ -256,12 +286,18 @@ for (i in seq_along(combined_conditions)) {
   }
   res_shrunk <- lfcShrink(dds_i, coef=coef_name, type="apeglm")
 
-  upTEGs   <- res[row.names(res) %in% TEGs$GeneId & res$log2FoldChange >= lfc_threshold  & !is.na(res$padj) & res$padj < padj_threshold,]
-  upTEs    <- res[row.names(res) %in% TEs$GeneId  & res$log2FoldChange >= lfc_threshold  & !is.na(res$padj) & res$padj < padj_threshold,]
-  upPCGs   <- res[row.names(res) %in% PCGs$GeneId & res$log2FoldChange >= lfc_threshold  & !is.na(res$padj) & res$padj < padj_threshold,]
-  downTEGs <- res[row.names(res) %in% TEGs$GeneId & res$log2FoldChange <= -lfc_threshold & !is.na(res$padj) & res$padj < padj_threshold,]
-  downTEs  <- res[row.names(res) %in% TEs$GeneId  & res$log2FoldChange <= -lfc_threshold & !is.na(res$padj) & res$padj < padj_threshold,]
-  downPCGs <- res[row.names(res) %in% PCGs$GeneId & res$log2FoldChange <= -lfc_threshold & !is.na(res$padj) & res$padj < padj_threshold,]
+  if (strand == "_AS") {
+    rule_values <- antisense_rule_values(res, combined, single)
+    kept <- antisense_call_kept(rule_values$antisense_over_leakage, rule_values$opposite_strand_sense_DEG)
+  } else {
+    kept <- rep(TRUE, nrow(res))
+  }
+  upTEGs   <- res[is_call(res, TEGs, "up", kept),]
+  upTEs    <- res[is_call(res, TEs,  "up", kept),]
+  upPCGs   <- res[is_call(res, PCGs, "up", kept),]
+  downTEGs <- res[is_call(res, TEGs, "down", kept),]
+  downTEs  <- res[is_call(res, TEs,  "down", kept),]
+  downPCGs <- res[is_call(res, PCGs, "down", kept),]
   DEGs <- list(upTEGs=upTEGs, upTEs=upTEs, upPCGs=upPCGs, downTEGs=downTEGs, downTEs=downTEs, downPCGs=downPCGs)
 
   DEGs_mean <- lapply(DEGs, FUN=mean_TPM_to_df, sample_nb=length(unique(sort(samples$condition))))
@@ -271,12 +307,14 @@ for (i in seq_along(combined_conditions)) {
   ifelse(!dir.exists(dirname_pair), dir.create(dirname_pair), FALSE)
 
   df_shrunk <- data.frame(Geneid=row.names(res_shrunk), as.data.frame(res_shrunk), check.names=FALSE)
+  if (strand == "_AS") df_shrunk <- cbind(df_shrunk, rule_values)
   write.table(df_shrunk, file=paste0(dirname_pair, combined, "_vs_", single, "_shrunken_log2FC_all_genes.tsv"), quote=F, sep="\t", row.names=F, col.names=T)
 
   # un-shrunken (raw results()) log2FC estimates for all genes -- same shape as the shrunken
   # export above, but from `res` (the value DEG calling itself uses) rather than `res_shrunk`.
   # Mirrors DESeq2_pipeline.R's per-comparison shrunken/un-shrunken pairing.
   df_raw <- data.frame(Geneid=row.names(res), as.data.frame(res), check.names=FALSE)
+  if (strand == "_AS") df_raw <- cbind(df_raw, rule_values)
   write.table(df_raw, file=paste0(dirname_pair, combined, "_vs_", single, "_unshrunken_log2FC_all_genes.tsv"), quote=F, sep="\t", row.names=F, col.names=T)
 
   invisible(mapply(FUN = DEG_heatmap_df, x=DEGs_mean, y=paste0(combined, "_vs_", single, "_", names(DEGs), "_mean"), MoreArgs = list(z=cts_summary_norm_mean[,which(names(cts_summary_norm_mean) %in% samples$condition)], dirname=dirname_pair) ))
