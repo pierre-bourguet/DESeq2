@@ -9,6 +9,8 @@
 #   opposite-strand partner  no feature overlapping it (>= 1 bp) on the opposite strand is called in sense, in the same direction, in the same
 #                            contrast (the antisense reads would be that feature's transcript).
 # Full results tables keep every feature with the two values the rules use: antisense_over_leakage and opposite_strand_sense_DEG.
+# Lists built from the calls count a feature called in both orientations once ("sense wins", per condition or across conditions):
+# pipelines/3-tag-rna-seq/README.md, "Sense and antisense features".
 # Benchmark and simulation behind the rules: shared/tools/deseq2_antisense_benchmark/ (results in the projects listed in tools_inventory.tsv).
 
 leak_fold <- 10
