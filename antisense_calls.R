@@ -9,8 +9,8 @@
 #   opposite-strand partner  no feature overlapping it (>= 1 bp) on the opposite strand is called in sense, in the same direction, in the same
 #                            contrast (the antisense reads would be that feature's transcript).
 # Full results tables keep every feature with the two values the rules use: antisense_over_leakage and opposite_strand_sense_DEG.
-# Lists built from the calls count a feature called in both orientations once ("sense wins", per condition or across conditions):
-# pipelines/3-tag-rna-seq/README.md, "Sense and antisense features".
+# Lists built from the calls count a feature called in both orientations once, in the orientation with the larger change (one_entry_per_feature,
+# union_one_entry_per_feature below): pipelines/3-tag-rna-seq/README.md, "Sense and antisense features".
 # Benchmark and simulation behind the rules: shared/tools/deseq2_antisense_benchmark/ (results in the projects listed in tools_inventory.tsv).
 
 leak_fold <- 10
@@ -61,3 +61,45 @@ opposite_strand_sense_calls <- function(ids, lfc, pairs, sense_up, sense_down) {
 }
 
 antisense_call_kept <- function(over_leakage, partners) !is.na(over_leakage) & over_leakage > leak_fold & is.na(partners)
+
+# One entry per feature. A feature called in both orientations (same direction) is represented by the orientation with the larger change in mean
+# normalized count: condition minus reference for up calls, reference minus condition for down calls; ties go to sense. A change measures the
+# reads the comparison adds or removes, so a constant opposite-strand transcript contributes nothing to it.
+#   ids     called IDs of one direction, antisense IDs with the _AS suffix
+#   change  named by the same IDs
+# Returns one row per feature: Geneid (ID of the orientation kept) and orientations_called (sense, antisense or both).
+one_entry_per_feature <- function(ids, change) {
+  ids <- unique(ids)
+  feature <- sub("_AS$", "", ids)
+  both <- unique(feature[duplicated(feature)])
+  cs <- change[both]; ca <- change[paste0(both, "_AS")]
+  cs[is.na(cs)] <- 0; ca[is.na(ca)] <- 0
+  dropped <- c(paste0(both, "_AS")[ca <= cs], both[ca > cs])
+  kept <- ids[!ids %in% dropped]
+  f <- sub("_AS$", "", kept)
+  data.frame(Geneid = kept, orientations_called = ifelse(f %in% both, "both", ifelse(grepl("_AS$", kept), "antisense", "sense")),
+             stringsAsFactors = FALSE)
+}
+
+# Union over comparisons, one entry per feature. A feature called (either orientation) in any comparison is one entry; among the orientations
+# called in some comparison, the one with the larger change summed over the comparisons where the feature is called is kept.
+#   calls    named list, called IDs of one direction per comparison
+#   changes  list with the same names, named change vectors per comparison (as in one_entry_per_feature)
+union_one_entry_per_feature <- function(calls, changes) {
+  ids <- unique(unlist(calls))
+  feature <- sub("_AS$", "", ids)
+  total <- setNames(numeric(length(ids)), ids)
+  for (k in names(calls)) {
+    sel <- ids[feature %in% sub("_AS$", "", calls[[k]])]
+    v <- changes[[k]][sel]
+    v[is.na(v)] <- 0
+    total[sel] <- total[sel] + v
+  }
+  one_entry_per_feature(ids, total)
+}
+
+# Change in mean normalized count of every feature in one comparison, in the direction of the calls. norm_mean: features x conditions
+orientation_change <- function(norm_mean, cond, ref, direction) {
+  d <- setNames(norm_mean[, cond] - norm_mean[, ref], rownames(norm_mean))
+  if (direction == "down") -d else d
+}

@@ -35,7 +35,8 @@
 # args[3] = "sense" or "antisense" -- must match the strand of the dds[_AS].rds
 #           being loaded. Antisense also reads dds.rds and antisense_leakage.tsv
 #           from dds_dir: its calls pass the rules of antisense_calls.R, as in
-#           DESeq2_pipeline.R.
+#           DESeq2_pipeline.R, and it writes DEGs_both_orientations/ (one
+#           entry per feature) for each comparison.
 # args[4] = "quantseq" (RPM) or "" (TPM) -- must match the normalization used
 #           in the original run (so the TPM/RPM columns attached to DEG tables
 #           here are computed the same way).
@@ -325,6 +326,23 @@ for (i in seq_along(combined_conditions)) {
   write.table(x=t(as.data.frame(lapply(DEGs, FUN=nrow))), file=paste0(dirname_pair, combined, "_vs_", single, "_DEGs_summary.tsv"), quote=F, sep="\t", row.names=T, col.names=F)
 
   cat(paste0("DEGs_", combined, "_vs_", single, strand), "\n", file=manifest_file, append=TRUE, sep="")
+
+  # one entry per feature (sense and antisense calls together), as DEGs_both_orientations/ of DESeq2_pipeline.R
+  if (strand == "_AS") {
+    dir.create("DEGs_both_orientations", showWarnings=FALSE)
+    r_S <- results(dds_sense, contrast=c("condition", combined, single))
+    cond_means <- function(d) sapply(c(combined, single), function(c) rowMeans(counts(d, normalized=TRUE)[, d$condition == c, drop=FALSE]))
+    nm_AS <- cond_means(dds)
+    rownames(nm_AS) <- paste0(rownames(nm_AS), "_AS")
+    nm <- rbind(cond_means(dds_sense), nm_AS)
+    tab <- data.frame(Geneid=c(row.names(r_S), paste0(row.names(res), "_AS")), GeneId=c(row.names(r_S), row.names(res)),
+                      log2FoldChange=c(r_S$log2FoldChange, res$log2FoldChange), padj=c(r_S$padj, res$padj))
+    for (cl in c("TEGs", "TEs", "PCGs")) for (direction in c("up", "down")) {
+      called <- tab$Geneid[c(is_call(r_S, get(cl), direction), is_call(res, get(cl), direction, kept))]
+      e <- merge(one_entry_per_feature(called, orientation_change(nm, combined, single, direction)), tab, by="Geneid", sort=FALSE)
+      write.table(e, file=paste0("DEGs_both_orientations/", combined, "_vs_", single, "_", direction, cl, ".tsv"), quote=F, sep="\t", row.names=F, col.names=T)
+    }
+  }
 }
 
 unlink("Rplots.pdf")

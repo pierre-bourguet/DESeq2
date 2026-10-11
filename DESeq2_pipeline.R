@@ -44,7 +44,10 @@
 # factors of the sense fit; antisense DEG calls are kept only if they pass the
 # leakage and opposite-strand partner rules of antisense_calls.R (this
 # folder). Writes antisense_leakage.tsv (leak rate per library) and adds the
-# two values the rules use to the all-genes tables of each comparison.
+# two values the rules use to the all-genes tables of each comparison. It
+# also writes DEGs_both_orientations/: sense and antisense calls together,
+# one entry per feature (a feature called in both orientations is kept in
+# the orientation with the larger change; antisense_calls.R).
 #
 # The fitted Master dds object is saved as dds[_AS].rds at the root of the
 # output directory (readRDS() it back to build custom contrasts without
@@ -507,5 +510,50 @@ DEG_write <- function(x, y) {
 }
 invisible(mapply(FUN = DEG_write, x=DEGs_batch, y=names(DEGs_batch)))
 write.table(x=t(as.data.frame(lapply(DEGs_batch, FUN=length))), file=paste0(batch_dir, "DEGs_batch.tsv"), quote=F, sep="\t", row.names=T, col.names=F)
+
+# ============================================================================
+# One entry per feature (antisense run): sense and antisense calls of each
+# comparison and of their union over comparisons, a feature called in both
+# orientations counted once (one_entry_per_feature, antisense_calls.R).
+# DEGs_both_orientations/<cond>_vs_<ref>_<class>.tsv, batch_<class>.tsv and
+# DEGs_summary.tsv; Geneid carries _AS when the antisense orientation is kept.
+# ============================================================================
+if (strand == "_AS") {
+  both_dir <- "DEGs_both_orientations/"
+  dir.create(both_dir, showWarnings=FALSE)
+  cond_means <- function(d) sapply(levels(d$condition), function(c) rowMeans(counts(d, normalized=TRUE)[, d$condition == c, drop=FALSE]))
+  nm_AS <- cond_means(dds)
+  rownames(nm_AS) <- paste0(rownames(nm_AS), "_AS")
+  nm <- rbind(cond_means(dds_sense), nm_AS)
+  res_both <- lapply(setNames(conditions, conditions), function(cond) {
+    r_S <- results(dds_sense, contrast=c("condition", cond, args[2]))
+    r_A <- all_res[[cond]]
+    data.frame(Geneid=c(row.names(r_S), paste0(row.names(r_A), "_AS")), GeneId=c(row.names(r_S), row.names(r_A)),
+               log2FoldChange=c(r_S$log2FoldChange, r_A$log2FoldChange), padj=c(r_S$padj, r_A$padj),
+               called_up=c(is_call(r_S, SAF, "up"), all_kept[[cond]] & is_call(r_A, SAF, "up")),
+               called_down=c(is_call(r_S, SAF, "down"), all_kept[[cond]] & is_call(r_A, SAF, "down")))
+  })
+  both_summary <- list()
+  for (cl in c("TEGs", "TEs", "PCGs")) {
+    ann_ids <- get(cl)$GeneId
+    for (direction in c("up", "down")) {
+      name <- paste0(direction, cl)
+      calls <- lapply(res_both, function(r) r$Geneid[r[[paste0("called_", direction)]] & r$GeneId %in% ann_ids])
+      changes <- lapply(setNames(conditions, conditions), orientation_change, norm_mean=nm, ref=args[2], direction=direction)
+      for (cond in conditions) {
+        e <- one_entry_per_feature(calls[[cond]], changes[[cond]])
+        e <- merge(e, res_both[[cond]][, c("Geneid", "GeneId", "log2FoldChange", "padj")], by="Geneid", sort=FALSE)
+        write.table(e, file=paste0(both_dir, cond, "_vs_", args[2], "_", name, ".tsv"), quote=F, sep="\t", row.names=F, col.names=T)
+        both_summary[[name]][[cond]] <- nrow(e)
+      }
+      u <- union_one_entry_per_feature(calls, changes)
+      u <- cbind(u, nm[u$Geneid, , drop=FALSE])
+      write.table(u, file=paste0(both_dir, "batch_", name, ".tsv"), quote=F, sep="\t", row.names=F, col.names=T)
+      both_summary[[name]][["batch"]] <- nrow(u)
+    }
+  }
+  write.table(data.frame(DEGs=names(both_summary), do.call(rbind, lapply(both_summary, unlist)), check.names=FALSE),
+              file=paste0(both_dir, "DEGs_summary.tsv"), quote=F, sep="\t", row.names=F, col.names=T)
+}
 
 unlink("Rplots.pdf") # delete that plot that is always created for some reason
