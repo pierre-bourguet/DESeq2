@@ -39,7 +39,7 @@ inputdir=${1%/}/ # deal with cases where the user did not include a trailing sla
 outputdir=${6:-$1} ; outputdir=${outputdir%/}/
 echo -e "$(date) .. job ${SLURM_JOB_NAME} started on node $(/bin/hostname) with slurm ID: ${SLURM_JOB_ID}.\ninput (mapping) folder: ${1}\noutput (DESeq2) folder: ${outputdir}\ncontrol: ${2}\nsample_table: ${3}\ntype: ${4} ${5}\n"
 
-module load build-env/f2022 r-bundle-bioconductor/3.19-foss-2023b-r-4.4.1
+module load R-bundle-Bioconductor/3.20-foss-2024a-R-4.4.2
 
 # Without this, the R module's linked BLAS/OpenMP libraries spawn as many
 # threads per process as the node has cores, ignoring --cpus-per-task=1 --
@@ -57,12 +57,10 @@ Rscript "${pipeline_dir}/DESeq2_pipeline.R" "$inputdir" "$2" "$3" "$4" sense "$5
 Rscript "${pipeline_dir}/DESeq2_pipeline.R" "$inputdir" "$2" "$3" "$4" antisense "$5" "$6"
 
 echo -e "\nrunning post-processing (DEGs_summary + cross-condition intersects, sense & antisense)...\n"
-module reset
-ml build-env/2020 r/4.0.2-foss-2018b
 "${pipeline_dir}/post_processing.sh" "$outputdir"
 
 echo -e "\nplotting 100kb windows for every comparison (sense & antisense)...\n"
-ml bedtools/2.27.1-foss-2018b
+module load BEDTools/2.31.1-GCC-14.3.0
 
 # manifests list exactly the DEGs_<cond>_vs_<ref>[_AS] folders produced this
 # run -- read from there instead of re-deriving them from the sample table,
@@ -74,8 +72,8 @@ for manifest in "${outputdir}DEGs_manifest.tsv" "${outputdir}DEGs_manifest_AS.ts
     stem="${comparison#DEGs_}" ; [[ "$manifest" == *_AS.tsv ]] && stem="${stem%_AS}"
     for i in "$dir"/${stem}_up*mean.tsv "$dir"/${stem}_down*mean.tsv; do
       [[ -e "$i" ]] || continue
-      if [[ $(wc -l < "$i") -gt 1 ]]; then
-        bedtools intersect -c -a /groups/berger/user/pierre.bourguet/genomics/Araport11/windows_chr1_5_100kb.tsv -b "$i" > "${i%mean.tsv}.tsv.100kbwindows_tmp" # drop "mean" from filename, it is no longer useful
+      if [[ $(wc -l < "$i") -gt 1 ]]; then # header line skipped: bedtools >= 2.31 rejects it
+        bedtools intersect -c -a /groups/berger/user/pierre.bourguet/genomics/Araport11/windows_chr1_5_100kb.tsv -b <(tail -n +2 "$i") > "${i%mean.tsv}.tsv.100kbwindows_tmp" # drop "mean" from filename, it is no longer useful
         Rscript "${pipeline_dir}/100kb_windows_plot.R" "${i%mean.tsv}.tsv.100kbwindows_tmp"
         rm "${i%mean.tsv}.tsv.100kbwindows_tmp"
       fi

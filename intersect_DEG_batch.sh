@@ -26,7 +26,7 @@ if [[ ! -s "$manifest" ]]; then
   exit 0
 fi
 
-ml build-env/2020 r/4.0.2-foss-2018b
+module load R-bundle-Bioconductor/3.20-foss-2024a-R-4.4.2
 
 outdir="intersect_DEG${suffix}"
 mkdir -p "${outdir}/tables"
