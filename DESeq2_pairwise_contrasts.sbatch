@@ -34,7 +34,7 @@ ddsdir=${4%/}/
 outputdir=${7:-$4} ; outputdir=${outputdir%/}/
 echo -e "$(date) .. job ${SLURM_JOB_NAME} started on node $(/bin/hostname) with slurm ID: ${SLURM_JOB_ID}.\ninput (mapping) folder: ${1}\ndds (read-only) folder: ${ddsdir}\noutput folder: ${outputdir}\nsample_table: ${2}\ncombined: ${5}\nsingle (baseline): ${6}\n"
 
-module load build-env/f2022 r-bundle-bioconductor/3.19-foss-2023b-r-4.4.1
+module load R-bundle-Bioconductor/3.20-foss-2024a-R-4.4.2
 
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
